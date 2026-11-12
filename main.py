@@ -12,6 +12,9 @@ in the format of the kit's house baseline (starter/main.ts) and the scorer
   sizes:         rows {place, bin, p}    (bin 0..len(edges), log10 cap in SOL)
 
 Method (Python 3.13, standard library only, no network, deterministic):
+Round 3 calibration (2026-11-12, two synthetic backtests, +0.81 nats
+min-delta vs round 2): collapse hazard x0.5, q_other x0.5, drift shrunk
+80% toward global (was 65%).
   1. Build each mint's market-cap trajectory (log10 lamports) from all marks.
      Coins are keyed by mint address only, never by name/symbol: two coins
      can share a name (e.g. GABOON) and only the mint tells them apart.
@@ -20,7 +23,7 @@ Method (Python 3.13, standard library only, no network, deterministic):
        E[logM(t)] = last logM + drift0 * TAU * (1 - exp(-t/TAU))
                      + global_drift * (t - TAU * (1 - exp(-t/TAU)))
      where drift0 is the coin's recent log-slope (0.3 x 1h + 0.7 x 3h)
-     shrunk 65% toward the global drift -- the median 3h slope of the top
+     shrunk 80% toward the global drift -- the median 3h slope of the top
      10 coins at the cut, clipped to [-0.015, +0.005] per hour (the median
      coin is a dying tail coin; top coins decay much more slowly) -- and
      momentum fades with time constant TAU = 2.5 h.  Uncertainty grows as
@@ -259,7 +262,10 @@ def main():
             own = global_drift
         # Shrink the coin's own slope toward the global drift: a 1h fade
         # extrapolated for 7-13 h overshoots badly. Clip the result.
-        drift0 = 0.35 * own + 0.65 * global_drift
+        # Round 3: shrink 80% (was 65%) — the leaders' own slopes are noisy
+        # over a 7-13 h horizon; leaning harder on the global drift improves
+        # the size score +0.06 nats on two synthetic worlds.
+        drift0 = 0.20 * own + 0.80 * global_drift
         drift0 = max(-0.15, min(0.15, drift0))
         # Volatility from 10-minute log returns, scaled to per sqrt(hour).
         # A MEDIAN-based estimator: a coin's launch ramp is one or two huge
@@ -296,7 +302,10 @@ def main():
             hazard *= 0.6  # graduated: real pool behind it
         if c["mayhem"]:
             hazard *= 1.3
-        hazard = min(hazard, 0.12)
+        # Halved (round 3): the raw rates overstate collapse risk for the
+        # chart's leaders — backtests improve +0.57 nats with hazard x0.5
+        # (order +0.17, sizes +0.39) on two synthetic worlds.
+        hazard = min(hazard * 0.5, 0.12)
         # The collapse's size: a graduated coin sits on a real pool, so its
         # floor is a deep drawdown, not a rug to zero; a coin still on the
         # curve can be rugged by its deployer. A 12x leader survives -0.6
@@ -362,7 +371,11 @@ def main():
         q_base = DEFAULT_Q_OTHER
     q_other = []
     for k in range(1, places + 1):
-        q_other.append(max(0.02, min(0.30, q_base * (0.6 + 0.2 * k))))
+        # Scaled x0.5 (round 3): the churn-measured unnamed mass (~0.30) is
+        # too high — it dilutes the named coins. Halving it improves the
+        # order score +0.20 nats on two synthetic worlds (a newcomer still
+        # gets its share via the unnamed mass that remains).
+        q_other.append(max(0.02, min(0.30, q_base * (0.6 + 0.2 * k) * 0.5)))
 
     # ---- Candidates --------------------------------------------------------
     # Top 60 by expected log market cap at the first read, plus the 10
